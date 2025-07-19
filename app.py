@@ -1,36 +1,50 @@
+
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="CashFlow App", layout="wide")
-st.title("📊 CashFlow – analiza wydatków")
+# --- Konfiguracja strony ---
+st.set_page_config(page_title="Budżet 2025", layout="wide")
 
+st.title("📊 Aplikacja Budżetowa 2025")
+
+# --- Wczytanie danych ---
 @st.cache_data
 def load_data():
-    df = pd.read_csv("glide_expenses_clean.csv")
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    df["month"] = df["month"].astype(str)
-    return df
+    xls = pd.ExcelFile("Budżed_2025_shared 2 2.xlsm", engine="openpyxl")
+    
+    wydatki = pd.read_excel(xls, sheet_name="Wydatki", header=1)
+    wydatki = wydatki.dropna(subset=["Kwota", "Za Co", "Kategoria", "Data", "Miesiąc"])
+    wydatki["Data"] = pd.to_datetime(wydatki["Data"])
+    wydatki["Kwota"] = pd.to_numeric(wydatki["Kwota"], errors="coerce")
 
-df = load_data()
+    wplywy = pd.read_excel(xls, sheet_name="Wpływy", header=0)
+    wplywy = wplywy.dropna(subset=["Kwota", "Revenue", "Data", "Miesiąc"])
+    wplywy["Data"] = pd.to_datetime(wplywy["Data"])
+    wplywy["Kwota"] = pd.to_numeric(wplywy["Kwota"], errors="coerce")
 
-available_months = sorted(df["month"].dropna().unique())
-selected_month = st.selectbox("Wybierz miesiąc", available_months)
+    return wydatki, wplywy
 
-filtered_df = df[df["month"] == selected_month]
+wydatki, wplywy = load_data()
 
-total = filtered_df["amount"].sum()
-st.metric("💸 Suma wydatków", f"{total:,.2f} zł")
+# --- Agregacja miesięczna ---
+suma_wydatkow = wydatki.groupby("Miesiąc")["Kwota"].sum().rename("Suma Wydatków")
+suma_wplywow = wplywy.groupby("Miesiąc")["Kwota"].sum().rename("Suma Wpływów")
 
-st.subheader("📋 Lista wydatków")
-st.dataframe(filtered_df[["date", "description", "category", "amount"]].sort_values("date"))
+budzet = pd.concat([suma_wplywow, suma_wydatkow], axis=1).fillna(0)
+budzet["Bilans"] = budzet["Suma Wpływów"] - budzet["Suma Wydatków"]
+budzet.reset_index(inplace=True)
 
-st.subheader("📈 Wydatki według kategorii")
-category_summary = filtered_df.groupby("category")["amount"].sum().sort_values()
+# --- Interfejs użytkownika ---
+st.subheader("📅 Podsumowanie miesięczne")
+st.dataframe(budzet.style.format({"Suma Wpływów": "{:,.2f} zł", "Suma Wydatków": "{:,.2f} zł", "Bilans": "{:,.2f} zł"}))
 
-fig, ax = plt.subplots(figsize=(8, 5))
-category_summary.plot(kind="barh", ax=ax, color="#3399cc")
-ax.set_xlabel("Kwota (zł)")
-ax.set_ylabel("Kategoria")
-ax.set_title("Wydatki wg kategorii")
+# --- Wykres ---
+st.subheader("📈 Wykres bilansu miesięcznego")
+fig, ax = plt.subplots(figsize=(10, 4))
+ax.bar(budzet["Miesiąc"], budzet["Bilans"], color=["green" if x >= 0 else "red" for x in budzet["Bilans"]])
+ax.axhline(0, color="black", linewidth=0.8)
+ax.set_ylabel("Bilans (zł)")
+ax.set_xlabel("Miesiąc")
+ax.set_title("Bilans miesięczny")
 st.pyplot(fig)
